@@ -5,7 +5,9 @@ from fakedet.config import Config
 from fakedet.models.base import Detector
 
 
-def build_model(cfg: Config, name: str) -> Detector:
+def build_model(cfg: Config, name: str, load_pretrained: bool = True) -> Detector:
+    """load_pretrained=False skips downloading ImageNet weights when a checkpoint will overwrite them
+    (the frozen CLIP backbone is always loaded: it is not stored in checkpoints)."""
     m, crop = cfg.models[name], cfg.data.crop_size
     kind = m.type
     if kind == "cnn":
@@ -16,7 +18,7 @@ def build_model(cfg: Config, name: str) -> Detector:
         return NPR(input=m.get("input", "npr"))
     if kind == "timm":
         from fakedet.models.pretrained import TimmDetector
-        return TimmDetector(m.arch, pretrained=m.get("pretrained", True), img_size=crop)
+        return TimmDetector(m.arch, pretrained=m.get("pretrained", True) and load_pretrained, img_size=crop)
     if kind == "clip":
         from fakedet.models.clip import CLIPDetector
         rc = m.get("random_config")
