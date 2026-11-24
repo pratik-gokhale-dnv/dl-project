@@ -152,6 +152,12 @@ models:
     head: mlp
 
 # --------------------------------------------------------------------------- #
+# `fakedet all` runs these stages in order (add `tune` before `train` to search lr / weight decay first)
+# --------------------------------------------------------------------------- #
+pipeline:
+  stages: [data, train, eval, analyze, report]
+
+# --------------------------------------------------------------------------- #
 # Which runs to train: models x training generators x seeds
 # --------------------------------------------------------------------------- #
 experiments:
@@ -185,7 +191,8 @@ analysis:
   features:
     variant: matched
     n_images: 500
-  jpeg:                      # Hypothesis 3
+  jpeg:                      # Hypothesis 3: re-compress test images at these JPEG qualities
+    variant: matched
     qualities: [95, 85, 75, 50]
     generators: [sd14, sd15]
     n_images: 1000           # per label
@@ -193,4 +200,4 @@ analysis:
     h1: {clip_models: [clip_final_linear, clip_final_mlp, clip_mid_linear, clip_mid_mlp]}
     h2: {train_generator: sd14, min_drop: 0.05}
     h3: {cnn_models: [cnn], npr_models: [npr, npr_rgb]}
-    h4: {alpha: 0.05}
+    h4: {alpha: 0.05, include_separate: false}   # include BigGAN (resolution confound) in the correlation?

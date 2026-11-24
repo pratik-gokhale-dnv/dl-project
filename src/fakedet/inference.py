@@ -13,7 +13,7 @@ from fakedet.config import Config
 from fakedet.data.dataset import make_loader, to_float
 from fakedet.models import clip_layers_needed
 from fakedet.models.base import Detector
-from fakedet.utils import ensure_dir, log
+from fakedet.utils import ensure_dir
 
 
 def autocast_ctx(device: torch.device, enabled: bool = True):
@@ -28,30 +28,31 @@ def _loader(cfg: Config, manifest: pd.DataFrame, batch_size: int, jpeg_quality: 
 
 
 # ----------------------------------------------------------------- frozen CLIP features
-def _feature_key(model: Detector, manifest: pd.DataFrame, crop: int) -> str:
+def _feature_key(model: Detector, manifest: pd.DataFrame, crop: int, jpeg_quality: int | None) -> str:
     h = hashlib.sha1()
-    h.update(f"{model.backbone_id}|{crop}".encode())
+    h.update(f"{model.backbone_id}|{crop}|{jpeg_quality}".encode())
     h.update("\n".join(manifest.path).encode())
     return h.hexdigest()[:20]
 
 
 @torch.no_grad()
 def clip_features(model: Detector, manifest: pd.DataFrame, cfg: Config, device: torch.device,
-                  desc: str = "") -> dict:
+                  desc: str = "", jpeg_quality: int | None = None) -> dict:
     """{layer: float16 tensor (N, D)} for every CLIP layer used by the configured variants.
     Computed once per image list and cached on disk, since the backbone is frozen."""
     layers = clip_layers_needed(cfg)
     if model.layer not in layers:
         layers.append(model.layer)
     cache = ensure_dir(Path(cfg.project.paths["cache_dir"]) / "clip_features") / \
-        f"{_feature_key(model, manifest, cfg.data.crop_size)}.pt"
+        f"{_feature_key(model, manifest, cfg.data.crop_size, jpeg_quality)}.pt"
     if cache.exists():
         feats = torch.load(cache)
         if all(l in feats for l in layers):
             return feats
     model.to(device).eval()
     out = {l: [] for l in layers}
-    for x, _ in tqdm(_loader(cfg, manifest, cfg.eval.batch_size), desc=f"CLIP features {desc}", leave=False):
+    for x, _ in tqdm(_loader(cfg, manifest, cfg.eval.batch_size, jpeg_quality), desc=f"CLIP features {desc}",
+                     leave=False):
         with autocast_ctx(device):
             f = model.extract(to_float(x.to(device)), layers)
         for l in layers:
@@ -66,8 +67,8 @@ def clip_features(model: Detector, manifest: pd.DataFrame, cfg: Config, device: 
 def predict_logits(model: Detector, manifest: pd.DataFrame, cfg: Config, device: torch.device,
                    jpeg_quality: int | None = None, desc: str = "") -> np.ndarray:
     model.to(device).eval()
-    if model.frozen_backbone and jpeg_quality is None:  # head on cached features
-        feats = clip_features(model, manifest, cfg, device, desc)[model.layer]
+    if model.frozen_backbone:  # head on cached backbone features
+        feats = clip_features(model, manifest, cfg, device, desc, jpeg_quality)[model.layer]
         out = [model.head(feats[i:i + 4096].float().to(device)).squeeze(1).float().cpu()
                for i in range(0, len(feats), 4096)]
         return torch.cat(out).numpy()

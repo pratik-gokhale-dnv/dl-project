@@ -6,7 +6,7 @@ import pandas as pd
 import pyarrow as pa
 from PIL import Image
 
-from fakedet.config import apply_overrides, load_config, planned_runs
+from fakedet.config import apply_overrides, planned_runs
 from fakedet.data import genimage
 from fakedet.data.build import build_datasets, load_manifest, subset
 from fakedet.data.dataset import ImageDataset, fit_and_crop
@@ -45,9 +45,9 @@ def test_balanced_pick_is_balanced():
 
 
 def test_config_overrides_and_extends(cfg):
-    assert cfg.data.source == "synthetic" and cfg.data.crop_size == 64
+    assert cfg.data.source == "synthetic" and cfg.data.crop_size == 48
     assert cfg.models.clip_mid_mlp.head == "mlp" and cfg.models.clip_mid_mlp.random_config.hidden_size == 32
-    assert len(planned_runs(cfg)) == 9 * 5
+    assert len(planned_runs(cfg)) == 9 * 2  # raw sd14 + matched sd14
     raw = {"a": {"b": 1}}
     assert apply_overrides(raw, ["a.b=3"]) == {"a": {"b": 3}}
 
@@ -98,7 +98,7 @@ def test_build_raw_and_matched(cfg):
     assert set(raw[raw.split != "test"].generator) == {"sd14"}
     # matched: everything JPEG, reals Q96 only, balanced classes, all generators
     assert set(matched.fmt) == {"JPEG"} and set(matched.quality) == {96}
-    assert set(matched[matched.split != "test"].generator) == {"sd14", "adm", "glide", "vqdm"}
+    assert set(matched[matched.split != "test"].generator) == {"sd14"}
     assert set(matched[matched.split == "test"].generator) == set(cfg.data.generators)
     for (g, s), grp in matched.groupby(["generator", "split"]):
         assert (grp.label == 0).sum() == (grp.label == 1).sum()
@@ -122,7 +122,7 @@ def test_crop_never_resizes_large_but_upsamples_small():
 
 def test_dataset_item(cfg):
     build_datasets(cfg)
-    m = subset(load_manifest(cfg, "matched"), "adm", "train")
+    m = subset(load_manifest(cfg, "matched"), "sd14", "train")
     ds = ImageDataset(m, cfg.project.paths["data_dir"], 64, train=True)
     x, y = ds[0]
     assert x.shape == (3, 64, 64) and str(x.dtype) == "torch.uint8" and y.item() in (0.0, 1.0)

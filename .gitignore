@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+*_smoke/
 *.egg-info/
 
 # Generated artefacts (all paths are configurable in config.yaml)

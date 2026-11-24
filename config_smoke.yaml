@@ -10,8 +10,11 @@ project:
 
 data:
   source: synthetic
-  crop_size: 64
-  synthetic: {images_per_label: 60, test_images_per_label: 40, size: 80}
+  crop_size: 48
+  matched_train_generators: [sd14]           # one training generator keeps the smoke run short
+  synthetic: {images_per_label: 90, test_images_per_label: 40, size: 64}
+
+pipeline: {stages: [data, tune, train, eval, analyze, report]}
 
 training: {epochs: 2, batch_size: 16, amp: false, patience: 0, warmup_epochs: 0}
 
@@ -20,9 +23,9 @@ tuning:
   grid: {lr: [1.0e-3, 1.0e-4], weight_decay: [1.0e-2]}
 
 models:
-  cnn: {widths: [8, 16, 32, 32], training: {epochs: 4, lr: 1.0e-3}}
-  npr: {training: {epochs: 4}}
-  npr_rgb: {training: {epochs: 4}}
+  cnn: {widths: [8, 16, 32, 32], training: {epochs: 8, lr: 1.0e-3}}
+  npr: {training: {epochs: 8}}
+  npr_rgb: {training: {epochs: 8}}
   resnet50: {pretrained: false, seeds: [0]}
   deit_s: {pretrained: false, seeds: [0]}
   clip_final_linear: &tiny_clip

@@ -21,12 +21,12 @@ import pandas as pd
 import torch
 from scipy.stats import rankdata
 
-from fakedet.config import (Config, generators, model_seeds, parse_run_name, planned_runs, separate_generators,
+from fakedet.config import (Config, generators, parse_run_name, planned_runs, separate_generators,
                             unseen_generators)
 from fakedet.data.build import load_manifest, subset
 from fakedet.inference import predict_logits
 from fakedet.train import load_trained, runs_dir
-from fakedet.utils import ensure_dir, get_device, log, save_json
+from fakedet.utils import ensure_dir, get_device, log
 
 METRICS = ["acc", "real_acc", "fake_acc", "auc", "ap"]
 
@@ -91,6 +91,25 @@ def bootstrap_metrics(y: np.ndarray, s: np.ndarray, cfg: Config, seed: int = 0, 
         idx = stratified_resample(y, min(chunk, cfg.eval.bootstrap_samples - start), rng)
         parts.append(batch_metrics(y, s[idx], thr))
     return {k: np.concatenate([p[k] for p in parts]) for k in METRICS}
+
+
+def acc_replicates(y: np.ndarray, s: np.ndarray, cfg: Config, seed: int = 0, chunk: int = 100) -> np.ndarray:
+    """Bootstrap replicates of accuracy only (same resamples as `bootstrap_metrics`, but fast).
+    Test sets of equal size and `seed` get identical resamples, so differences between models/conditions are paired."""
+    y, s = sort_by_label(np.asarray(y), np.asarray(s))
+    rng = np.random.default_rng(seed)
+    correct = ((s >= logit_threshold(cfg.eval.threshold)) == (y > 0)).astype(np.float64)
+    parts = []
+    for start in range(0, cfg.eval.bootstrap_samples, chunk):
+        idx = stratified_resample(y, min(chunk, cfg.eval.bootstrap_samples - start), rng)
+        parts.append(correct[idx].mean(1))
+    return np.concatenate(parts)
+
+
+def run_acc_replicates(cfg: Config, run: str, variant: str, gen: str) -> tuple[float, np.ndarray]:
+    y, s = load_preds(cfg, run, variant, gen)
+    return point_metrics(y, s, logit_threshold(cfg.eval.threshold))["acc"], \
+        acc_replicates(y, s, cfg, stable_seed(cfg.project.seed, variant, gen))
 
 
 def ci_bounds(reps: np.ndarray, level: float) -> tuple[float, float]:
@@ -177,9 +196,9 @@ def mean_over_generators(cfg: Config, run: str, variant: str, gens: list[str]) -
     for g in gens:
         if not preds_path(cfg, run, variant, g).exists():
             continue
-        y, s = load_preds(cfg, run, variant, g)
-        point.append(point_metrics(y, s, logit_threshold(cfg.eval.threshold))["acc"])
-        reps.append(bootstrap_metrics(y, s, cfg, stable_seed(cfg.project.seed, variant, g))["acc"])
+        acc, rep = run_acc_replicates(cfg, run, variant, g)
+        point.append(acc)
+        reps.append(rep)
     if not reps:
         return None
     mean_rep = np.mean(reps, axis=0)

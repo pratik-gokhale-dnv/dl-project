@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import timm
-import torch
 
 from fakedet.models.base import Detector, Normalize, tokens_to_grid
 

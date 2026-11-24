@@ -8,8 +8,9 @@ from fakedet.models.scratch import NPR
 @pytest.mark.parametrize("name", ["cnn", "npr", "npr_rgb", "resnet50", "deit_s", "clip_final_linear",
                                   "clip_mid_mlp"])
 def test_forward_embed_gradcam_target(cfg, name):
+    S = cfg.data.crop_size
     model = build_model(cfg, name).eval()
-    x = torch.rand(2, 3, 64, 64)
+    x = torch.rand(2, 3, S, S)
     logits, emb = model(x), model.embed(x)
     assert logits.shape == (2,) and emb.ndim == 2 and emb.shape[0] == 2
     layer, reshape = model.cam_target()
@@ -38,5 +39,6 @@ def test_clip_frozen_and_head_only_state(cfg):
 
 def test_clip_layers_and_extract(cfg):
     m = build_model(cfg, "clip_final_linear").eval()
-    f = m.extract(torch.rand(2, 3, 64, 64), ["final", 16, 24])
+    S = cfg.data.crop_size
+    f = m.extract(torch.rand(2, 3, S, S), ["final", 16, 24])
     assert f["final"].shape == (2, 16) and f[16].shape == (2, 32) and f[24].shape == (2, 32)
