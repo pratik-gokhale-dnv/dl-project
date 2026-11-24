@@ -1,0 +1,194 @@
+###############################################################################
+# fakedet - the ONE configuration file that drives the whole pipeline.
+#
+#   uv run fakedet data      # 1. download / build the raw + format-matched datasets
+#   uv run fakedet train     # 2. train every experiment listed below
+#   uv run fakedet eval      # 3. cross-generator evaluation (+ 95% CIs)
+#   uv run fakedet analyze   # 4. Fourier, Grad-CAM, feature distance, JPEG, hypotheses
+#   uv run fakedet all       # everything above, in order
+#
+# Any value can be overridden on the command line without editing this file:
+#   uv run fakedet train --set training.epochs=2 --set project.device=cpu
+###############################################################################
+
+project:
+  name: finding-pixels
+  seed: 0                 # default seed; see experiments.seeds for the per-run seeds
+  device: auto            # auto | cpu | cuda | cuda:1 | mps
+  num_workers: 4          # DataLoader workers (set 0 when debugging)
+  paths:                  # relative paths are resolved against this file's folder
+    data_dir: data        # raw/ and matched/ datasets + manifests
+    runs_dir: runs        # checkpoints, training logs, curves, predictions
+    results_dir: results  # tables, figures, hypothesis report
+    cache_dir: cache      # downloaded arrow shards, cached CLIP features
+
+# --------------------------------------------------------------------------- #
+# Data
+# --------------------------------------------------------------------------- #
+data:
+  source: genimage          # genimage = real download | synthetic = tiny fake data for smoke tests
+  hf_repo: nebula/GenImage-arrow
+  hf_revision: null         # pin a commit hash so the data cannot change during the project
+  hf_splits: {train: train, test: test}   # mirror folder names (the proposal's "val" folder is "test" in the mirror)
+  keep_shards: false        # false = delete each .arrow shard after its images are extracted
+  crop_size: 224            # images are CROPPED (never resized) to this size ...
+                            # ... except images smaller than this (BigGAN 128px) which are upsampled first
+
+  # role=train -> used for training/validation AND testing, role=test -> unseen (test only)
+  generators:
+    sd14:       {hf_dir: stable_diffusion_v_1_4, title: "SD v1.4",    role: train}
+    adm:        {hf_dir: ADM,                    title: "ADM",        role: train}
+    glide:      {hf_dir: glide,                  title: "GLIDE",      role: train}
+    vqdm:       {hf_dir: VQDM,                   title: "VQDM",       role: train}
+    sd15:       {hf_dir: stable_diffusion_v_1_5, title: "SD v1.5",    role: test}
+    wukong:     {hf_dir: wukong,                 title: "Wukong",     role: test}
+    midjourney: {hf_dir: Midjourney,             title: "Midjourney", role: test}
+    biggan:     {hf_dir: BigGAN,                 title: "BigGAN",     role: test, report_separately: true}
+
+  # Sampling (per generator, per class label = real / fake)
+  train_samples: 5000       # train+val images per label from the generator's train folder
+  val_fraction: 0.1         # held out from the training images (training generator only)
+  test_samples: 3000        # test images per label from the generator's test folder
+  class_balance: true       # cap images per ImageNet class so that all 1000 classes are balanced
+  num_classes: 1000
+  real_oversample: 1.3      # extra reals so enough JPEG-Q96 reals remain for the matched version
+  max_shards: 40            # download budget per (generator, split); null = no limit.
+                            # More shards -> more ImageNet classes covered (1000-class balance
+                            # needs the full train folder, which is ~100 GB per generator).
+  seed: 0
+
+  # Dataset versions
+  matched_quality: 96                              # JPEG quality used to format-match (Grommelt et al.)
+  raw_train_generators: [sd14]                     # raw (JPEG real vs PNG fake), as released
+  matched_train_generators: [sd14, adm, glide, vqdm]
+  test_variants: [raw, matched]                    # versions built for the test split
+
+  # Only used when source = synthetic
+  synthetic: {images_per_label: 40, test_images_per_label: 30, size: 96}
+
+# --------------------------------------------------------------------------- #
+# Training: defaults for every model (override per model under models.<name>.training)
+# --------------------------------------------------------------------------- #
+training:
+  epochs: 10
+  batch_size: 64
+  optimizer: adamw          # adamw | adam | sgd
+  lr: 1.0e-4
+  weight_decay: 1.0e-2
+  warmup_epochs: 1
+  grad_clip: 1.0
+  amp: true                 # mixed precision on CUDA
+  patience: 5               # early stopping on validation loss (0 = off)
+  augment: {hflip: true, random_crop: true}
+  use_tuned: true           # use runs/tuning/best_hparams.json when it exists (see `fakedet tune`)
+
+# Hyper-parameter search; the best setting per model is picked by VALIDATION LOSS.
+tuning:
+  generator: sd14
+  variant: matched
+  epochs: 4
+  grid:
+    lr: [1.0e-3, 3.0e-4, 1.0e-4, 3.0e-5]
+    weight_decay: [1.0e-2, 1.0e-4]
+
+# --------------------------------------------------------------------------- #
+# Detectors (five detectors / three groups; NPR-RGB and the CLIP variants are ablations)
+# --------------------------------------------------------------------------- #
+models:
+  # Group 1: trained from scratch
+  cnn:
+    type: cnn
+    title: "Scratch CNN"
+    widths: [32, 64, 128, 256, 256]
+    training: {epochs: 20, lr: 1.0e-3}
+  npr:
+    type: npr                # Neighbouring Pixel Relationships (Tan et al., CVPR'24)
+    title: "NPR"
+    input: npr               # npr = x - up(down(x)) residual
+    training: {epochs: 20, lr: 2.0e-4}
+  npr_rgb:
+    type: npr
+    title: "NPR (RGB input)"
+    input: rgb               # same network, normal RGB input
+    training: {epochs: 20, lr: 2.0e-4}
+
+  # Group 2: ImageNet pre-trained, fine-tuned with identical settings
+  resnet50:
+    type: timm
+    title: "ResNet-50"
+    arch: resnet50
+    pretrained: true
+    seeds: [0, 1, 2]
+  deit_s:
+    type: timm
+    title: "DeiT-S"
+    arch: deit_small_patch16_224
+    pretrained: true
+    seeds: [0, 1, 2]
+
+  # Group 3: frozen CLIP ViT-L/14 + trainable head (UnivFD). Features are cached, so these are cheap.
+  clip_final_linear: &clip
+    type: clip
+    title: "UnivFD (final, linear)"
+    hf_name: openai/clip-vit-large-patch14
+    layer: final             # final = projected image embedding, or an int = CLS token after that block
+    head: linear             # linear | mlp
+    batch_size: 256
+    training: {epochs: 30, lr: 1.0e-3, weight_decay: 0.0, batch_size: 256, patience: 8}
+  clip_final_mlp:
+    <<: *clip
+    title: "UnivFD (final, MLP)"
+    head: mlp
+  clip_mid_linear:
+    <<: *clip
+    title: "UnivFD (layer 16, linear)"
+    layer: 16
+  clip_mid_mlp:
+    <<: *clip
+    title: "UnivFD (layer 16, MLP)"
+    layer: 16
+    head: mlp
+
+# --------------------------------------------------------------------------- #
+# Which runs to train: models x training generators x seeds
+# --------------------------------------------------------------------------- #
+experiments:
+  models: [cnn, npr, npr_rgb, resnet50, deit_s, clip_final_linear, clip_final_mlp, clip_mid_linear, clip_mid_mlp]
+  seeds: [0]                 # default seeds; a model's own `seeds:` list takes precedence
+
+# --------------------------------------------------------------------------- #
+# Evaluation
+# --------------------------------------------------------------------------- #
+eval:
+  batch_size: 128
+  threshold: 0.5
+  bootstrap_samples: 1000    # 95% CIs via percentile bootstrap over test images
+  ci_level: 0.95
+
+# --------------------------------------------------------------------------- #
+# Failure analysis + hypotheses
+# --------------------------------------------------------------------------- #
+analysis:
+  # Runs used for the single-model analyses (Grad-CAM, feature distances, JPEG)
+  reference: {train_generator: sd14, train_variant: matched, seed: 0}
+
+  fourier:
+    variant: matched         # dataset version whose test images are analysed
+    n_images: 500            # per generator and label
+  gradcam:
+    models: [cnn, npr, resnet50, deit_s]
+    variant: matched
+    n_images: 100            # images averaged per generator
+    n_examples: 3            # example overlays per generator
+  features:
+    variant: matched
+    n_images: 500
+  jpeg:                      # Hypothesis 3
+    qualities: [95, 85, 75, 50]
+    generators: [sd14, sd15]
+    n_images: 1000           # per label
+  hypotheses:
+    h1: {clip_models: [clip_final_linear, clip_final_mlp, clip_mid_linear, clip_mid_mlp]}
+    h2: {train_generator: sd14, min_drop: 0.05}
+    h3: {cnn_models: [cnn], npr_models: [npr, npr_rgb]}
+    h4: {alpha: 0.05}
