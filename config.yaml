@@ -131,6 +131,8 @@ models:
     type: clip
     title: "UnivFD (final, linear)"
     hf_name: openai/clip-vit-large-patch14
+    pretrained: true         # false + random_config = tiny random CLIP (used by the smoke test)
+    random_config: null
     layer: final             # final = projected image embedding, or an int = CLS token after that block
     head: linear             # linear | mlp
     batch_size: 256

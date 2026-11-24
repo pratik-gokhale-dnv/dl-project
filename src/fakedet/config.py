@@ -70,11 +70,19 @@ def apply_overrides(raw: dict, overrides: list[str] | None) -> dict:
     return raw
 
 
+def _read_yaml(path: Path) -> dict:
+    """Read a YAML file; `extends: other.yaml` merges this file on top of another one."""
+    with open(path) as f:
+        raw = yaml.safe_load(f) or {}
+    base = raw.pop("extends", None)
+    if base:
+        return deep_merge(_read_yaml((path.parent / base).resolve()), raw)
+    return raw
+
+
 def load_config(path: str | Path = "config.yaml", overrides: list[str] | None = None) -> Config:
     path = Path(path).resolve()
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-    raw = apply_overrides(raw, overrides)
+    raw = apply_overrides(_read_yaml(path), overrides)
     cfg = Config(raw)
     cfg["config_path"] = str(path)
     for k, v in cfg.project.paths.items():

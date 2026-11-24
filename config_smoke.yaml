@@ -1,0 +1,43 @@
+# Smoke-test configuration: tiny synthetic data, CPU, randomly initialised models.
+# It only lists what differs from config.yaml (`extends`), and runs the *entire* pipeline in minutes:
+#   uv run fakedet all --config config_smoke.yaml
+extends: config.yaml
+
+project:
+  device: cpu
+  num_workers: 0
+  paths: {data_dir: data_smoke, runs_dir: runs_smoke, results_dir: results_smoke, cache_dir: cache_smoke}
+
+data:
+  source: synthetic
+  crop_size: 64
+  synthetic: {images_per_label: 60, test_images_per_label: 40, size: 80}
+
+training: {epochs: 2, batch_size: 16, amp: false, patience: 0, warmup_epochs: 0}
+
+tuning:
+  epochs: 1
+  grid: {lr: [1.0e-3, 1.0e-4], weight_decay: [1.0e-2]}
+
+models:
+  cnn: {widths: [8, 16, 32, 32], training: {epochs: 4, lr: 1.0e-3}}
+  npr: {training: {epochs: 4}}
+  npr_rgb: {training: {epochs: 4}}
+  resnet50: {pretrained: false, seeds: [0]}
+  deit_s: {pretrained: false, seeds: [0]}
+  clip_final_linear: &tiny_clip
+    pretrained: false          # random tiny CLIP instead of downloading ViT-L/14
+    random_config: {hidden_size: 32, num_hidden_layers: 24, num_attention_heads: 2, intermediate_size: 64,
+                    patch_size: 16, projection_dim: 16}
+    training: {epochs: 10, lr: 1.0e-2}
+  clip_final_mlp: *tiny_clip
+  clip_mid_linear: *tiny_clip
+  clip_mid_mlp: *tiny_clip
+
+eval: {batch_size: 32, bootstrap_samples: 200}
+
+analysis:
+  fourier: {n_images: 20}
+  gradcam: {n_images: 6, n_examples: 2}
+  features: {n_images: 20}
+  jpeg: {qualities: [90, 50], generators: [sd14, sd15], n_images: 30}
