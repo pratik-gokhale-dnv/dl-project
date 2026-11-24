@@ -2,10 +2,14 @@
 # fakedet - the ONE configuration file that drives the whole pipeline.
 #
 #   uv run fakedet data      # 1. download / build the raw + format-matched datasets
+#   uv run fakedet tune      #    (optional) lr / weight-decay grid search per model
 #   uv run fakedet train     # 2. train every experiment listed below
 #   uv run fakedet eval      # 3. cross-generator evaluation (+ 95% CIs)
 #   uv run fakedet analyze   # 4. Fourier, Grad-CAM, feature distance, JPEG, hypotheses
-#   uv run fakedet all       # everything above, in order
+#   uv run fakedet report    # 5. results/report.md
+#   uv run fakedet all       # the stages under `pipeline.stages`, in order
+#   uv run fakedet plan      # list the planned runs / which are done
+# See README.md for details.
 #
 # Any value can be overridden on the command line without editing this file:
 #   uv run fakedet train --set training.epochs=2 --set project.device=cpu
