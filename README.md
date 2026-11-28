@@ -48,6 +48,10 @@ uv run fakedet all           # data -> train -> eval -> analyze -> report
 Each stage is **resumable**: finished work (downloaded shards, trained runs, predictions, cached CLIP features) is skipped on a re-run
 unless you pass `--force`.
 
+**Data is fetched on demand.** If the datasets are missing or incomplete when `tune`, `train`, `eval`, `analyze` or `all` runs, the
+entire dataset (every generator in the config, both the raw and the format-matched version) is downloaded / built first, so
+`uv run fakedet all` works from a fresh checkout. `uv run fakedet data` does the same step explicitly.
+
 ## 3. The single config file
 
 `config.yaml` is the only thing you edit. Sections:
@@ -76,7 +80,7 @@ A config may start with `extends: config.yaml` and list only what differs — `c
 ## 4. Pipeline stages and commands
 
 ```bash
-uv run fakedet data                # 1. sample GenImage, build raw + format-matched datasets + manifests
+uv run fakedet data                # 1. sample GenImage, build raw + format-matched datasets + manifests (run automatically if the data is missing)
 uv run fakedet tune                # 2. (optional) grid-search lr / weight decay per model on validation loss
 uv run fakedet train               # 3. train every planned run (model × training generator × variant × seed)
 uv run fakedet eval                # 4. cross-generator evaluation with 95% bootstrap CIs

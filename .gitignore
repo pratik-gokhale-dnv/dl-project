@@ -5,8 +5,9 @@ __pycache__/
 *_smoke/
 *.egg-info/
 
-# Generated artefacts (all paths are configurable in config.yaml)
-data/
-runs/
-results/
-cache/
+# Generated artefacts (all paths are configurable in config.yaml).
+# Anchored to the repo root so they do not also match the source package src/fakedet/data/.
+/data/
+/runs/
+/results/
+/cache/

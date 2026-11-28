@@ -23,21 +23,30 @@ ANALYSES = ["fourier", "jpeg", "features", "gradcam", "hypotheses"]
 
 def cmd_data(cfg: Config, args) -> None:
     from fakedet.data.build import build_datasets
-    build_datasets(cfg)
+    build_datasets(cfg, force=args.force)
+
+
+def ensure_data(cfg: Config) -> None:
+    """Stages that read images build the entire dataset first when it is missing."""
+    from fakedet.data.build import ensure_data as build_if_missing
+    build_if_missing(cfg)
 
 
 def cmd_tune(cfg: Config, args) -> None:
     from fakedet.train import tune
+    ensure_data(cfg)
     tune(cfg, models=args.models, force=args.force)
 
 
 def cmd_train(cfg: Config, args) -> None:
     from fakedet.train import train_all
+    ensure_data(cfg)
     train_all(cfg, models=args.models, generators=args.generators, variants=args.variants, force=args.force)
 
 
 def cmd_eval(cfg: Config, args) -> None:
     from fakedet.evaluate import evaluate_all
+    ensure_data(cfg)
     evaluate_all(cfg, models=args.models, force=args.force)
 
 
@@ -46,6 +55,7 @@ def cmd_analyze(cfg: Config, args) -> None:
     unknown = set(only) - set(ANALYSES)
     if unknown:
         raise SystemExit(f"unknown analysis {sorted(unknown)}; choose from {ANALYSES}")
+    ensure_data(cfg)
     for name in [a for a in ANALYSES if a in only]:  # fixed order: later steps read earlier outputs
         log.info("=== analysis: %s ===", name)
         if name == "fourier":
